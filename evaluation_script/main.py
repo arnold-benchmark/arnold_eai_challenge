@@ -1,81 +1,94 @@
-import random
+import os
+import pandas as pd
+import zipfile
 
+def evaluate(test_annotation_file, user_annotation_file, phase_codename, **kwargs):
+    
+    df = pd.read_csv(test_annotation_file)
+    folder_path = '/tmp/arnold_challenge'
+    with zipfile.ZipFile(user_annotation_file, 'r') as zip_ref:
+        if os.path.exists(folder_path):
+            os.system(f'rm -r {folder_path}')
+        zip_ref.extractall(folder_path)
 
-def evaluate(test_annotation_file, user_submission_file, phase_codename, **kwargs):
-    print("Starting Evaluation.....")
-    """
-    Evaluates the submission for a particular challenge phase and returns score
-    Arguments:
+    output_folder = folder_path
 
-        `test_annotations_file`: Path to test_annotation_file on the server
-        `user_submission_file`: Path to file submitted by the user
-        `phase_codename`: Phase to which submission is made
+    metadata = {
+        'file': [],
+        'run': [],
+        'success': [],
+        'task': [],
+        'split': []
+    }
+    # not_found = []
+    for root, dirs, files in os.walk(output_folder):
+        for file in files:
+            if file.endswith('.txt'):
+                parts = root.split('/')
+                
+                entry = parts[-1]
+                
+                task = parts[-4]
+                run = parts[-5].split('_')[2]
+                # print(entry)
+                # print('entry: ', entry)
+                split = df[df['file'] == entry]['split']
+                # if len(split.values) == 0:
+                #     not_found.append(root)
+                #     continue
+                
+                
+                with open(os.path.join(root, file), 'r') as f:
+                    lines = f.readlines()
+                    success = lines[0].strip() == 'success'
+                metadata['file'].append(entry)
+                metadata['run'].append(int(run))
+                metadata['success'].append(success)
+                metadata['task'].append(task)
+                # print(split.values)
+                metadata['split'].append(split.values[0])
 
-        `**kwargs`: keyword arguments that contains additional submission
-        metadata that challenge hosts can use to send slack notification.
-        You can access the submission metadata
-        with kwargs['submission_metadata']
+    df2 = pd.DataFrame.from_dict(metadata)
 
-        Example: A sample submission metadata can be accessed like this:
-        >>> print(kwargs['submission_metadata'])
-        {
-            'status': u'running',
-            'when_made_public': None,
-            'participant_team': 5,
-            'input_file': 'https://abc.xyz/path/to/submission/file.json',
-            'execution_time': u'123',
-            'publication_url': u'ABC',
-            'challenge_phase': 1,
-            'created_by': u'ABC',
-            'stdout_file': 'https://abc.xyz/path/to/stdout/file.json',
-            'method_name': u'Test',
-            'stderr_file': 'https://abc.xyz/path/to/stderr/file.json',
-            'participant_team_name': u'Test Team',
-            'project_url': u'http://foo.bar',
-            'method_description': u'ABC',
-            'is_public': False,
-            'submission_result_file': 'https://abc.xyz/path/result/file.json',
-            'id': 123,
-            'submitted_at': u'2017-03-20T19:22:03.880652Z'
-        }
-    """
-    output = {}
-    if phase_codename == "dev":
-        print("Evaluating for Dev Phase")
-        output["result"] = [
-            {
-                "train_split": {
-                    "Metric1": random.randint(0, 99),
-                    "Metric2": random.randint(0, 99),
-                    "Metric3": random.randint(0, 99),
-                    "Total": random.randint(0, 99),
-                }
+    # Merge df and df2
+    
+
+    # For files in df not in df2, create three entries for each run with 'success' set to False
+    missing_files = df[~df['file'].isin(df2['file'])]['file']
+    # print(missing_files)
+    # print(df)
+    # exit()
+    missing_entries = []
+    for file in missing_files:
+        for run in range(1, 4):  # Assuming runs are numbered 1, 2, 3
+            missing_entries.append({ 'file': file, 'run': run, 'success': False,\
+                                     'split': df[df['file'] == file]['split'].values[0], \
+                                    'task': df[df['file'] == file]['task'].values[0]})
+    
+    # Append missing entries to df3
+    df3 = pd.concat([df2, pd.DataFrame(missing_entries)], ignore_index=True)
+    # Group by task, split, and run, then calculate the mean success rate
+    grouped = df3.groupby(['task', 'split', 'run'])['success'].mean().reset_index()
+
+    # Now, group by task and split, and calculate the mean of the success rates across runs
+    final_grouped = grouped.groupby(['task', 'split'])['success'].mean().reset_index()
+
+    output = {'result': []}
+
+    for task in final_grouped['task'].unique():
+        task_dict = {}
+        task_data = final_grouped[final_grouped['task'] == task]
+
+        for _, row in task_data.iterrows():
+            task_dict[f"{row['split']}"] = {
+                'SR': row['success']
             }
-        ]
-        # To display the results in the result file
-        output["submission_result"] = output["result"][0]["train_split"]
-        print("Completed evaluation for Dev Phase")
-    elif phase_codename == "test":
-        print("Evaluating for Test Phase")
-        output["result"] = [
-            {
-                "train_split": {
-                    "Metric1": random.randint(0, 99),
-                    "Metric2": random.randint(0, 99),
-                    "Metric3": random.randint(0, 99),
-                    "Total": random.randint(0, 99),
-                }
-            },
-            {
-                "test_split": {
-                    "Metric1": random.randint(0, 99),
-                    "Metric2": random.randint(0, 99),
-                    "Metric3": random.randint(0, 99),
-                    "Total": random.randint(0, 99),
-                }
-            },
-        ]
-        # To display the results in the result file
-        output["submission_result"] = output["result"][0]
-        print("Completed evaluation for Test Phase")
+
+        output['result'].append({task: task_dict})
+    overall_average = final_grouped['success'].mean()
+    output['result'].append({'overall': overall_average})
+    # print(output)
     return output
+
+# evaluate('challenge_files_final.csv', '/home/nikepupu/Desktop/arnold/workspace/output.zip', '')
+                
