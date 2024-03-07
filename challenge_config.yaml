@@ -73,7 +73,7 @@ challenge_phases:
     allowed_submission_file_types: ".json, .zip, .txt, .tsv, .gz, .csv, .h5, .npy, .npz"
 
 dataset_splits:
-  - id: 1
+  - id: 1 
     name: Train Split
     codename: train_split
   - id: 2
